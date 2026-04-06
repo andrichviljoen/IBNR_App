@@ -3,11 +3,9 @@ from __future__ import annotations
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 from services.ai_context import build_ai_context, context_to_json
 from services.diagnostics import build_diagnostics
-from services.grid_input import grid_dataframe_to_tsv
 from services.origin_periods import generate_origin_sequence
 from services.reserving_calculations import run_chain_ladder
 from services.triangle_parser import ParseOptions, parse_triangle_text
@@ -17,13 +15,6 @@ st.set_page_config(page_title="Actuarial Triangle App", layout="wide")
 st.title("Actuarial Triangle App")
 st.caption("Reliable reserving workflow built around user-pasted triangles.")
 
-if "parse_requested" not in st.session_state:
-    st.session_state["parse_requested"] = False
-if "grid_triangle_text" not in st.session_state:
-    st.session_state["grid_triangle_text"] = ""
-if "grid_seed" not in st.session_state:
-    # Empty Excel-like starter grid users can paste into directly.
-    st.session_state["grid_seed"] = pd.DataFrame([["" for _ in range(16)] for _ in range(18)])
 
 with st.sidebar:
     st.header("Configuration")
@@ -62,60 +53,14 @@ with st.sidebar:
     remove_thousand_separators = st.checkbox("Remove thousand separators", value=True)
     parentheses_negative = st.checkbox("Interpret (123) as -123", value=True)
 
-st.subheader("Step 1-2: Provide Triangle Input")
-input_mode = st.radio("Input mode", ["Paste Text", "Editable Excel-style Grid"], horizontal=True)
 
-if input_mode == "Paste Text":
-    example = "\t0\t12\t24\t36\n2019\t100\t150\t180\t190\n2020\t110\t160\t200\t\n2021\t120\t170\t\t\n2022\t130\t\t\t"
-    pasted_text = st.text_area(
-        "Paste Excel-style triangle (tab-delimited)",
-        height=220,
-        placeholder=example,
-        value=st.session_state.get("grid_triangle_text", ""),
-    )
-else:
-    st.caption("Paste directly from Excel using Ctrl+V. Grid is fully editable.")
-
-    gb = GridOptionsBuilder.from_dataframe(st.session_state["grid_seed"])
-    gb.configure_default_column(
-        editable=True,
-        resizable=True,
-        filter=False,
-        sortable=False,
-        wrapText=False,
-    )
-    gb.configure_grid_options(
-        editable=True,
-        enableRangeSelection=True,
-        enableClipboard=True,
-        rowSelection="multiple",
-        suppressRowClickSelection=False,
-        domLayout="normal",
-    )
-
-    grid_response = AgGrid(
-        st.session_state["grid_seed"],
-        gridOptions=gb.build(),
-        fit_columns_on_grid_load=False,
-        update_mode=GridUpdateMode.MODEL_CHANGED,
-        allow_unsafe_jscode=False,
-        height=420,
-        theme="streamlit",
-        key="triangle_input_aggrid",
-    )
-
-    edited_df = pd.DataFrame(grid_response.get("data", pd.DataFrame()))
-
-    if st.button("Use this grid as triangle input"):
-        text_from_grid = grid_dataframe_to_tsv(edited_df)
-        st.session_state["grid_triangle_text"] = text_from_grid
-        st.session_state["parse_requested"] = True
-        st.success("Grid data captured as triangle input.")
-
-    pasted_text = st.session_state.get("grid_triangle_text", "")
-    if pasted_text:
-        st.caption("Preview of captured grid input")
-        st.code(pasted_text)
+st.subheader("Step 1-2: Paste Triangle")
+example = "\t0\t12\t24\t36\n2019\t100\t150\t180\t190\n2020\t110\t160\t200\t\n2021\t120\t170\t\t\n2022\t130\t\t\t"
+pasted_text = st.text_area(
+    "Paste Excel-style triangle (tab-delimited)",
+    height=220,
+    placeholder=example,
+)
 
 if st.button("Step 3: Validate and Parse", type="primary"):
     st.session_state["parse_requested"] = True
@@ -167,10 +112,11 @@ if st.session_state.get("parse_requested"):
     st.subheader("Step 5: Diagnostics and Reserving")
 
     initial_reserving = run_chain_ladder(parsed.wide_df, triangle_type)
+    default_excluded = []
     excluded = st.multiselect(
         "Exclude link ratio pairs from selected factors (sets factor to 1.0)",
         options=list(initial_reserving.selected_link_ratios.index),
-        default=[],
+        default=default_excluded,
     )
     reserving = run_chain_ladder(parsed.wide_df, triangle_type, excluded_pairs=excluded)
     diagnostics = build_diagnostics(reserving.cumulative_triangle, reserving.link_ratio_matrix)
@@ -231,4 +177,4 @@ if st.session_state.get("parse_requested"):
         mime="text/csv",
     )
 else:
-    st.info("Configure periods and provide triangle input, then click 'Validate and Parse'.")
+    st.info("Configure periods and paste a triangle, then click 'Validate and Parse'.")
